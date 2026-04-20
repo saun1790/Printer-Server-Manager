@@ -207,7 +207,7 @@ CREATE TABLE IF NOT EXISTS settings (
 -- Password: Admin123! (bcrypt hash)
 -- ===========================================
 INSERT INTO users (email, password, name, role, is_active) VALUES 
-('admin@printer.local', '$2b$10$rQZ5q.xJ.8VqKJ9N9V9V9OeE8E8E8E8E8E8E8E8E8E8E8E8E8E8E', 'Administrator', 'admin', TRUE)
+('admin@printer.local', '$2b$10$GMxlXLcQOrod83fNFcsDN.uyOMWNCTFEIlgx36CbyJ4GMS5ArwmTu', 'Administrator', 'admin', TRUE)
 ON DUPLICATE KEY UPDATE name = 'Administrator';
 
 -- ===========================================

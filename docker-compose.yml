@@ -14,7 +14,7 @@ services:
       TZ: ${TZ:-America/Chicago}
     volumes:
       - mysql_data:/var/lib/mysql
-      # - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     ports:
       - "3307:3306"
     networks:

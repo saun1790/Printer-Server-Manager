@@ -1,583 +1,637 @@
-# 🖨️ Printer Server Manager - Installation Guide
+# 🖨️ Printer Management System - Installation Guide
 
-Complete step-by-step guide to deploy the Printer Management System on a clean server.
+Complete copy-paste guide to deploy the system with Docker on Ubuntu/Debian.
 
 ---
 
 ## 📋 Table of Contents
 
-1. [Prerequisites](#prerequisites)
-2. [Server Requirements](#server-requirements)
-3. [Quick Installation](#quick-installation)
-4. [Manual Installation](#manual-installation)
-5. [Configuration](#configuration)
-6. [SSL Certificates](#ssl-certificates)
-7. [First Login](#first-login)
+1. [Requirements](#requirements)
+2. [Install Docker](#step-1-install-docker)
+3. [Clone & Configure](#step-2-clone--configure)
+4. [Deploy](#step-3-deploy)
+5. [First Login](#step-4-first-login)
+6. [CUPS Configuration (Host)](#step-5-cups-configuration)
+7. [Verify Everything Works](#step-6-verify)
 8. [Adding Printers](#adding-printers)
-9. [Maintenance](#maintenance)
+9. [Maintenance & Backup](#maintenance--backup)
 10. [Troubleshooting](#troubleshooting)
 
 ---
 
-## Prerequisites
-
-### Required Software
-
-| Software | Minimum Version | Purpose |
-|----------|----------------|---------|
-| Docker | 20.10+ | Container runtime |
-| Docker Compose | 2.0+ | Container orchestration |
-| Git | 2.0+ | Clone repository |
-
-### Check Installation
-
-```bash
-# Check Docker
-docker --version
-# Docker version 24.0.0 or higher
-
-# Check Docker Compose
-docker compose version
-# Docker Compose version v2.20.0 or higher
-
-# Check Git
-git --version
-```
-
-### Install Docker (if not installed)
-
-**Ubuntu/Debian:**
-```bash
-# Update packages
-sudo apt update && sudo apt upgrade -y
-
-# Install Docker
-curl -fsSL https://get.docker.com -o get-docker.sh
-sudo sh get-docker.sh
-
-# Add user to docker group (logout/login required)
-sudo usermod -aG docker $USER
-
-# Install Docker Compose plugin
-sudo apt install docker-compose-plugin -y
-```
-
-**macOS:**
-```bash
-# Install Docker Desktop from https://docker.com/products/docker-desktop
-# Or using Homebrew:
-brew install --cask docker
-```
-
-**Windows:**
-- Download and install [Docker Desktop](https://docker.com/products/docker-desktop)
-- Enable WSL2 backend
-
----
-
-## Server Requirements
-
-### Minimum Hardware
+## Requirements
 
 | Resource | Minimum | Recommended |
 |----------|---------|-------------|
+| OS | Ubuntu 22.04 LTS / Debian 12 | Ubuntu 24.04 LTS |
 | CPU | 2 cores | 4 cores |
-| RAM | 4 GB | 8 GB |
+| RAM | 2 GB | 4 GB |
 | Storage | 20 GB | 50 GB |
 | Network | 100 Mbps | 1 Gbps |
 
-### Network Requirements
+### Ports Used
 
-| Port | Service | Description |
-|------|---------|-------------|
-| 8080 | HTTP | Redirects to HTTPS (configurable via HTTP_PORT) |
-| 10443 | HTTPS | Main web interface (configurable via HTTPS_PORT) |
-| 631 | CUPS | Print server (internal only) |
-| 3000 | API | Backend (internal) |
-| 3306 | MySQL | Database (internal) |
+| Port | Service | Access |
+|------|---------|--------|
+| **8080** | Web UI (Nginx) | External — your users connect here |
+| 3000 | Backend API | Internal (Docker network only) |
+| 3307 | MySQL | Internal (exposed for debugging) |
+| 631 | CUPS | Host only (printer admin web interface) |
 
-> **Note:** Default ports are 8080/10443 to avoid conflicts with existing services. Change in `.env` if needed.
+---
 
-### Firewall Configuration
+## Step 1: Install Docker
 
 ```bash
-# Ubuntu/Debian with UFW
-sudo ufw allow 8080/tcp
-sudo ufw allow 10443/tcp
-sudo ufw reload
+# Update system
+sudo apt update && sudo apt upgrade -y
 
-# CentOS/RHEL with firewalld
-sudo firewall-cmd --permanent --add-port=8080/tcp
-sudo firewall-cmd --permanent --add-port=10443/tcp
-sudo firewall-cmd --reload
+# Install dependencies
+sudo apt install -y ca-certificates curl gnupg lsb-release
+
+# Add Docker GPG key
+sudo mkdir -p /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+
+# Add Docker repository
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+# Install Docker
+sudo apt update
+sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+# Add your user to docker group
+sudo usermod -aG docker $USER
+newgrp docker
+
+# Verify
+docker --version
+docker compose version
 ```
 
 ---
 
-## Quick Installation
-
-### One-Command Installation
+## Step 2: Clone & Configure
 
 ```bash
-# Clone and start
-git clone https://github.com/saun1790/Printer-Server-Manager.git
-cd Printer-Server-Manager
-docker compose up -d
+# Clone the repository
+cd ~
+git clone https://github.com/YOUR_ORG/TequilaPOS-Printer-Management.git
+cd TequilaPOS-Printer-Management
 
-# Wait for all services to be healthy (2-3 minutes)
-docker compose ps
-```
-
-That's it! Access the system at: `https://your-server-ip`
-
----
-
-## Manual Installation
-
-### Step 1: Clone Repository
-
-```bash
-cd /opt  # or your preferred directory
-git clone https://github.com/saun1790/Printer-Server-Manager.git
-cd Printer-Server-Manager
-```
-
-### Step 2: Configure Environment
-
-```bash
-# Copy example environment file
+# Create your .env file from the example
 cp .env.example .env
+```
 
-# Edit configuration
+Now edit `.env` with your values:
+
+```bash
 nano .env
 ```
 
-**Important `.env` variables:**
+**Minimum required changes** (replace the placeholder values):
 
-```env
-# Database - CHANGE THESE IN PRODUCTION!
-MYSQL_ROOT_PASSWORD=YourSecureRootPassword123!
+```dotenv
+# ===========================================
+# MySQL Database
+# ===========================================
+MYSQL_ROOT_PASSWORD=YourSecureRootPass123!
 MYSQL_DATABASE=printer_management
 MYSQL_USER=printer_admin
-MYSQL_PASSWORD=YourSecurePassword123!
+MYSQL_PASSWORD=YourSecurePass123!
 
-# JWT Secret - CHANGE THIS!
-JWT_SECRET=YourSuperSecretJWTKey2024!
-JWT_REFRESH_SECRET=YourRefreshTokenSecret2024!
+# ===========================================
+# JWT Authentication (CHANGE THESE!)
+# ===========================================
+JWT_SECRET=change_this_to_a_random_string_at_least_32_chars
+JWT_REFRESH_SECRET=change_this_to_another_random_string_32_chars
 
+# ===========================================
 # URLs
-FRONTEND_URL=https://your-domain.com
+# ===========================================
+FRONTEND_URL=http://YOUR_SERVER_IP:8080
+VITE_API_URL=/api
 
-# Driver pack: lite (default), common, or full
+# ===========================================
+# Timezone
+# ===========================================
+TZ=America/Chicago
+
+# ===========================================
+# Driver Pack: lite (default) | common | full
+# ===========================================
 DRIVER_SET=lite
 
-# Timezone
-TZ=America/Bogota
+# ===========================================
+# CUPS (host socket - leave as-is for production)
+# ===========================================
+CUPS_SERVER=/var/run/cups/cups.sock
+
+# ===========================================
+# Network for printer discovery (optional)
+# ===========================================
+DEFAULT_NETWORK=192.168.170.0/24
+
+# ===========================================
+# SMTP Email (optional)
+# ===========================================
+SMTP_HOST=
+SMTP_PORT=587
+SMTP_USER=
+SMTP_PASSWORD=
+SMTP_FROM=
 ```
 
-### Step 3: Build and Start
+> 💡 **Tip:** Generate random JWT secrets with: `openssl rand -hex 32`
+
+---
+
+## Step 3: Deploy
+
+### 3a. Build and Start
 
 ```bash
+cd ~/TequilaPOS-Printer-Management
+
 # Build all containers
 docker compose build
 
-# Start in detached mode
+# Start all services
 docker compose up -d
 
-# Check status
+# Watch the logs to confirm everything starts
+docker compose logs -f --tail 50
+```
+
+Wait until you see:
+```
+printer-backend   | 🚀 Server running on port 3000
+printer-backend   | ✅ Database connection established
+```
+
+Press `Ctrl+C` to exit the logs.
+
+### 3b. Database Initialization
+
+The database schema and default admin user are created **automatically** on first start. The `init.sql` file is mounted into MySQL's init directory and executed when the database volume is created for the first time.
+
+**Verify the database was created:**
+
+```bash
+docker exec printer-mysql mysql -u root -p"$(grep MYSQL_ROOT_PASSWORD .env | cut -d= -f2)" -e "USE printer_management; SHOW TABLES;"
+```
+
+You should see these tables:
+
+```
++-------------------------------+
+| Tables_in_printer_management  |
++-------------------------------+
+| maintenance_schedule          |
+| notification_configs          |
+| notifications                 |
+| print_jobs                    |
+| printer_stats_daily           |
+| printers                      |
+| refresh_tokens                |
+| settings                      |
+| system_logs                   |
+| users                         |
++-------------------------------+
+```
+
+### 3c. Verify All Services
+
+```bash
+# Check all containers are running
 docker compose ps
-```
 
-Expected output:
-```
-NAME                STATUS              PORTS
-printer-mysql       running (healthy)   3306/tcp
-printer-backend     running (healthy)   3000/tcp, 631/tcp
-printer-frontend    running             80/tcp
-printer-nginx       running             0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp
-```
+# Expected: all 4 containers show "running (healthy)"
+#   printer-mysql     running (healthy)
+#   printer-backend   running (healthy)
+#   printer-frontend  running (healthy)
+#   printer-nginx     running (healthy)
 
-### Step 4: Verify Installation
-
-```bash
-# Check all containers are healthy
-docker compose ps
-
-# Check logs for errors
-docker compose logs --tail=50
-
-# Test API health endpoint
-curl -k https://localhost/api/system/health
+# Quick health check
+curl -s http://localhost:8080/api/system/health
+# Returns: {"status":"healthy", "database":"connected", ...}
 ```
 
 ---
 
-## Configuration
+## Step 4: First Login
 
-### Environment Variables
+Open your browser and go to:
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `MYSQL_ROOT_PASSWORD` | - | MySQL root password |
-| `MYSQL_DATABASE` | printer_management | Database name |
-| `MYSQL_USER` | printer_admin | Database user |
-| `MYSQL_PASSWORD` | - | Database password |
-| `JWT_SECRET` | - | JWT signing key |
-| `JWT_EXPIRY` | 7d | Token expiration |
-| `FRONTEND_URL` | https://localhost | Frontend URL for CORS |
-| `DRIVER_SET` | lite | Printer driver pack (see below) |
-| `TZ` | America/Bogota | Timezone for logs/dates |
-
-### Driver Packs (DRIVER_SET)
-
-The `DRIVER_SET` variable controls which printer drivers are installed in the backend container:
-
-| Value | Size | Printers Supported | Use Case |
-|-------|------|-------------------|----------|
-| `lite` | ~500MB | HP, Kyocera, Epson, Brother (IPP) | Most network printers with IPP Everywhere |
-| `common` | ~1.5GB | + Canon, Ricoh, Lexmark, Samsung | Older printers needing specific drivers |
-| `full` | ~3GB | + All CUPS drivers | Legacy printers, special models |
-
-**Recommendation:**
-- Start with `lite` (default) - works with 90% of modern printers
-- Use `common` if you have Canon/Ricoh printers
-- Use `full` only if specific printers don't work
-
-To change driver pack:
-```bash
-# Edit .env
-DRIVER_SET=common
-
-# Rebuild backend
-docker compose build backend
-docker compose up -d backend
+```
+http://YOUR_SERVER_IP:8080
 ```
 
-### Docker Compose Override
-
-Create `docker-compose.override.yml` for local customizations:
-
-```yaml
-version: '3.8'
-services:
-  backend:
-    environment:
-      - LOG_LEVEL=debug
-  nginx:
-    ports:
-      - "8080:80"
-      - "8443:443"
-```
-
----
-
-## SSL Certificates
-
-### Self-Signed (Development)
-
-SSL certificates are **automatically generated** on first startup. For development, accept the browser security warning.
-
-### Let's Encrypt (Production)
-
-```bash
-# Install certbot
-sudo apt install certbot -y
-
-# Stop nginx temporarily
-docker compose stop nginx
-
-# Get certificate
-sudo certbot certonly --standalone -d your-domain.com
-
-# Copy certificates
-sudo cp /etc/letsencrypt/live/your-domain.com/fullchain.pem ./nginx/certs/server.crt
-sudo cp /etc/letsencrypt/live/your-domain.com/privkey.pem ./nginx/certs/server.key
-
-# Restart nginx
-docker compose up -d nginx
-```
-
-### Custom Certificates
-
-Place your certificates in:
-- `./nginx/certs/server.crt` - Certificate file
-- `./nginx/certs/server.key` - Private key
-
----
-
-## First Login
-
-### Default Credentials
+**Default admin credentials:**
 
 | Field | Value |
 |-------|-------|
-| URL | `https://your-server-ip:10443` |
-| Email/Username | `admin` |
-| Password | `admin123` |
+| **Email** | `admin@printer.local` |
+| **Password** | `Admin123!` |
 
-⚠️ **IMPORTANT:** Change the default password immediately after first login!
+> ⚠️ **Change the admin password immediately** after first login via Profile → Change Password.
 
-### Change Password
+---
 
-1. Login with default credentials
-2. Go to **Settings** or click on your profile
-3. Select **Change Password**
-4. Enter new secure password
+## Step 5: CUPS Configuration
+
+The system uses the **host's CUPS** service (not an internal one) via a mounted Unix socket (`/run/cups/cups.sock`). This lets the Docker container manage printers through the host's native CUPS.
+
+### 5a. Install CUPS on the Host
+
+```bash
+# Remove Snap version if present (Snap CUPS causes socket issues)
+sudo snap remove cups 2>/dev/null
+
+# Install native CUPS
+sudo apt install -y cups cups-client cups-bsd
+
+# Add your user to lpadmin group (required for CUPS admin)
+sudo usermod -aG lpadmin $USER
+
+# Enable and start CUPS
+sudo systemctl enable cups
+sudo systemctl start cups
+```
+
+### 5b. Configure CUPS to Listen on All Interfaces
+
+By default CUPS only listens on `localhost`. We need it to accept connections from the local network and Docker containers.
+
+```bash
+# Backup original config
+sudo cp /etc/cups/cupsd.conf /etc/cups/cupsd.conf.bak
+
+# Apply the correct configuration
+sudo tee /etc/cups/cupsd.conf > /dev/null << 'CUPSEOF'
+LogLevel warn
+PageLogFormat
+MaxLogSize 0
+ErrorPolicy retry-job
+
+# Listen on all interfaces + Unix socket
+Listen *:631
+Listen /run/cups/cups.sock
+
+Browsing No
+BrowseLocalProtocols dnssd
+DefaultAuthType Basic
+WebInterface Yes
+IdleExitTimeout 60
+
+# Server access (local network + Docker networks)
+<Location />
+  Order allow,deny
+  Allow @LOCAL
+  Allow from 192.168.0.0/16
+  Allow from 172.16.0.0/12
+  Allow from 10.0.0.0/8
+  Allow from 127.0.0.1
+</Location>
+
+# Admin pages
+<Location /admin>
+  AuthType Default
+  Require user @SYSTEM
+  Order allow,deny
+  Allow @LOCAL
+  Allow from 192.168.0.0/16
+  Allow from 172.16.0.0/12
+  Allow from 127.0.0.1
+</Location>
+
+# Config files
+<Location /admin/conf>
+  AuthType Default
+  Require user @SYSTEM
+  Order allow,deny
+  Allow @LOCAL
+  Allow from 192.168.0.0/16
+  Allow from 127.0.0.1
+</Location>
+
+# Log files
+<Location /admin/log>
+  AuthType Default
+  Require user @SYSTEM
+  Order allow,deny
+  Allow @LOCAL
+  Allow from 192.168.0.0/16
+  Allow from 127.0.0.1
+</Location>
+
+# Default job policies
+<Policy default>
+  JobPrivateAccess default
+  JobPrivateValues default
+  SubscriptionPrivateAccess default
+  SubscriptionPrivateValues default
+
+  <Limit Create-Job Print-Job Print-URI Validate-Job>
+    Order deny,allow
+  </Limit>
+
+  <Limit Send-Document Send-URI Hold-Job Release-Job Restart-Job Purge-Jobs Set-Job-Attributes Create-Job-Subscription Renew-Subscription Cancel-Subscription Get-Notifications Reprocess-Job Cancel-Current-Job Suspend-Current-Job Resume-Job Cancel-My-Jobs Close-Job CUPS-Move-Job>
+    Require user @OWNER @SYSTEM
+    Order deny,allow
+  </Limit>
+
+  <Limit CUPS-Get-Document>
+    AuthType Default
+    Require user @OWNER @SYSTEM
+    Order deny,allow
+  </Limit>
+
+  <Limit CUPS-Add-Modify-Printer CUPS-Delete-Printer CUPS-Add-Modify-Class CUPS-Delete-Class CUPS-Set-Default CUPS-Get-Devices>
+    AuthType Default
+    Require user @SYSTEM
+    Order deny,allow
+  </Limit>
+
+  <Limit Pause-Printer Resume-Printer Enable-Printer Disable-Printer Pause-Printer-After-Current-Job Hold-New-Jobs Release-Held-New-Jobs Deactivate-Printer Activate-Printer Restart-Printer Shutdown-Printer Startup-Printer Promote-Job Schedule-Job-After Cancel-Jobs CUPS-Accept-Jobs CUPS-Reject-Jobs>
+    AuthType Default
+    Require user @SYSTEM
+    Order deny,allow
+  </Limit>
+
+  <Limit Cancel-Job>
+    Require user @OWNER @SYSTEM
+    Order deny,allow
+  </Limit>
+
+  <Limit CUPS-Authenticate-Job>
+    AuthType Default
+    Require user @OWNER @SYSTEM
+    Order deny,allow
+  </Limit>
+
+  <Limit All>
+    Order deny,allow
+  </Limit>
+</Policy>
+CUPSEOF
+
+# Restart CUPS
+sudo systemctl restart cups
+```
+
+### 5c. Verify CUPS
+
+```bash
+# Check CUPS is listening on all interfaces
+ss -tlnp | grep 631
+# ✅ Should show: 0.0.0.0:631 (NOT 127.0.0.1:631)
+
+# Check web interface
+curl -s -o /dev/null -w "%{http_code}" http://localhost:631/
+# ✅ Should return: 200
+
+# Check socket permissions
+ls -la /run/cups/cups.sock
+# ✅ Should show: srw-rw-rw-
+
+# If permissions are too restrictive:
+sudo chmod 666 /run/cups/cups.sock
+```
+
+### 5d. Verify Docker Can Access CUPS
+
+```bash
+# The container should see the host's CUPS via the socket
+docker exec printer-backend lpstat -r
+# ✅ Should show: scheduler is running
+
+docker exec printer-backend lpstat -v
+# Lists any printers already configured in CUPS
+```
+
+### 5e. CUPS Admin Web Interface
+
+Access **http://YOUR_SERVER_IP:631** from your browser. Login with your **Linux username** and password (must be in the `lpadmin` group).
+
+### 5f. Open Firewall (if using UFW)
+
+```bash
+sudo ufw allow 8080/tcp    # Web UI
+sudo ufw allow 631/tcp     # CUPS admin interface (optional)
+```
+
+---
+
+## Step 6: Verify
+
+Run this full verification script:
+
+```bash
+echo "=== Docker Containers ==="
+docker compose ps --format "table {{.Name}}\t{{.Status}}"
+
+echo ""
+echo "=== Backend Health ==="
+curl -s http://localhost:8080/api/system/health | python3 -m json.tool
+
+echo ""
+echo "=== CUPS Status ==="
+docker exec printer-backend lpstat -r
+
+echo ""
+echo "=== Login Test ==="
+TOKEN=$(curl -s -X POST http://localhost:8080/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@printer.local","password":"Admin123!"}' \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['accessToken'])")
+
+if [ -n "$TOKEN" ] && [ "$TOKEN" != "None" ]; then
+    echo "✅ Login successful"
+    curl -s http://localhost:8080/api/auth/me \
+      -H "Authorization: Bearer $TOKEN" | python3 -m json.tool
+else
+    echo "❌ Login failed"
+fi
+```
 
 ---
 
 ## Adding Printers
 
-### Method 1: Auto Discovery (Recommended)
+### Via Web UI
+1. Go to **http://YOUR_SERVER_IP:8080**
+2. Navigate to **Discovery** → Scan your network
+3. Select discovered printers → **Add All**
 
-1. Go to **Admin → Discovery**
-2. Enter IP range (e.g., `192.168.1.1-192.168.1.254`)
-3. Click **Start Scan**
-4. Select discovered printers
-5. Click **Add Selected**
+### Via API
+```bash
+# Get auth token
+TOKEN=$(curl -s -X POST http://localhost:8080/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@printer.local","password":"Admin123!"}' \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['accessToken'])")
 
-### Method 2: Manual Add
+# Add a printer
+curl -s -X POST http://localhost:8080/api/printers \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{
+    "name": "KITCHEN",
+    "ip_address": "192.168.170.22",
+    "port": 9100,
+    "protocol": "socket",
+    "location": "Kitchen"
+  }' | python3 -m json.tool
+```
 
-1. Go to **Dashboard**
-2. Click **+ Add Printer**
-3. Fill in:
-   - Name: `Office Printer 1`
-   - IP Address: `192.168.1.100`
-   - Protocol: `IPP` (recommended)
-4. Click **Detect** to auto-detect model
-5. Click **Save**
+### Test Printing
 
-### Supported Protocols
+```bash
+# Send test print via API
+PRINTER_ID=1  # Change to your printer's ID
 
-| Protocol | Port | Best For |
-|----------|------|----------|
-| IPP | 631 | Modern printers (recommended) |
-| Socket | 9100 | Raw printing |
-| LPD | 515 | Legacy printers |
+curl -s -X POST http://localhost:8080/api/print/test \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d "{\"printer_id\": $PRINTER_ID}" | python3 -m json.tool
+
+# Or test directly from the host via CUPS
+echo "TEST PRINT" | lp -d printer_cups_name -o raw
+
+# Or bypass CUPS entirely (raw socket)
+echo "DIRECT TEST" | nc -w 3 192.168.170.22 9100
+```
 
 ---
 
-## Maintenance
+## Maintenance & Backup
 
-### Daily Operations
+### Database Backup
 
 ```bash
-# View logs
-docker compose logs -f
+# Backup
+docker exec printer-mysql mysqldump -u root \
+  -p"$(grep MYSQL_ROOT_PASSWORD .env | cut -d= -f2)" \
+  printer_management > backup_$(date +%Y%m%d).sql
 
-# View specific service logs
-docker compose logs -f backend
-
-# Restart a service
-docker compose restart backend
+# Restore
+cat backup_YYYYMMDD.sql | docker exec -i printer-mysql mysql -u root \
+  -p"$(grep MYSQL_ROOT_PASSWORD .env | cut -d= -f2)" printer_management
 ```
 
-### Backup
+### Update the System
 
 ```bash
-# Backup database
-docker exec printer-mysql mysqldump -u root -p printer_management > backup_$(date +%Y%m%d).sql
-
-# Backup CUPS configuration
-docker cp printer-backend:/etc/cups ./cups_backup_$(date +%Y%m%d)
-```
-
-### Restore
-
-```bash
-# Restore database
-cat backup_20260209.sql | docker exec -i printer-mysql mysql -u root -p printer_management
-
-# Restore CUPS
-docker cp ./cups_backup_20260209/. printer-backend:/etc/cups/
-docker compose restart backend
-```
-
-### Update
-
-```bash
-# Pull latest changes
-git pull origin main
-
-# Rebuild and restart
+cd ~/TequilaPOS-Printer-Management
+git pull
 docker compose build
 docker compose up -d
-
-# Check status
-docker compose ps
 ```
 
-### Cleanup
+### View Logs
 
 ```bash
-# Remove unused images
-docker image prune -f
+# All services
+docker compose logs -f --tail 100
 
-# Remove unused volumes (⚠️ careful - removes data)
-docker volume prune -f
+# Backend only
+docker logs printer-backend --tail 50 -f
 
-# Full cleanup (keeps data volumes)
+# CUPS logs (on host)
+sudo tail -50 /var/log/cups/error_log
+```
+
+### Reset Database (⚠️ destroys all data)
+
+```bash
 docker compose down
+docker volume rm $(docker volume ls -q | grep mysql_data)
 docker compose up -d
+# Wait 30s for MySQL to re-initialize. Schema + admin user are recreated automatically.
 ```
 
 ---
 
 ## Troubleshooting
 
-### Common Issues
-
-#### Container won't start
+### Container won't start
 
 ```bash
-# Check logs
-docker compose logs backend
+docker compose logs backend --tail 50
+docker compose logs mysql --tail 50
 
-# Check if port is in use
-sudo lsof -i :443
-sudo lsof -i :80
-
-# Restart all
+# Full rebuild
 docker compose down
+docker compose build --no-cache
 docker compose up -d
 ```
 
-#### Database connection error
+### "Connection refused" on port 8080
 
 ```bash
-# Check MySQL is running
-docker compose ps printer-mysql
-
-# Check MySQL logs
-docker compose logs printer-mysql
-
-# Verify credentials in .env match docker-compose.yml
+docker compose ps nginx
+docker exec printer-nginx nginx -t
+ss -tlnp | grep 8080
 ```
 
-#### Printers not detected
+### CUPS: "Unable to connect to server: Bad file descriptor"
 
 ```bash
-# Check network connectivity from container
-docker exec printer-backend ping 192.168.1.100
+# Is CUPS running?
+sudo systemctl status cups
 
-# Check SNMP is working
-docker exec printer-backend snmpwalk -v1 -c public 192.168.1.100 system
+# Socket exists and has correct permissions?
+ls -la /run/cups/cups.sock
+sudo chmod 666 /run/cups/cups.sock
 
-# Verify firewall allows SNMP (UDP 161)
+# Restart backend
+docker compose restart backend
 ```
 
-#### SSL Certificate errors
+### CUPS web shows "Forbidden"
+
+Re-run the full CUPS configuration in [Step 5b](#5b-configure-cups-to-listen-on-all-interfaces).
+
+### Login returns "Invalid credentials"
 
 ```bash
-# Regenerate certificates
-rm -rf ./nginx/certs/*
-docker compose restart nginx
+# Check the admin user exists
+docker exec printer-mysql mysql -u root \
+  -p"$(grep MYSQL_ROOT_PASSWORD .env | cut -d= -f2)" \
+  printer_management -e "SELECT id, email, role, is_active FROM users;"
 
-# Check certificate
-openssl s_client -connect localhost:443 -servername localhost
+# Recreate admin user if missing (password: Admin123!)
+docker exec -i printer-mysql mysql -u root \
+  -p"$(grep MYSQL_ROOT_PASSWORD .env | cut -d= -f2)" printer_management << 'SQL'
+INSERT INTO users (email, password, name, role, is_active) VALUES 
+('admin@printer.local', '$2b$10$GMxlXLcQOrod83fNFcsDN.uyOMWNCTFEIlgx36CbyJ4GMS5ArwmTu', 'Administrator', 'admin', TRUE)
+ON DUPLICATE KEY UPDATE password = '$2b$10$GMxlXLcQOrod83fNFcsDN.uyOMWNCTFEIlgx36CbyJ4GMS5ArwmTu';
+SQL
 ```
 
-#### Permission denied errors
+### Printers added but jobs don't print
 
 ```bash
-# Fix Docker socket permissions
-sudo chmod 666 /var/run/docker.sock
+# 1. Test network connectivity
+nc -zv 192.168.170.22 9100
 
-# Or add user to docker group
-sudo usermod -aG docker $USER
-# Logout and login again
+# 2. Test raw print (bypasses CUPS)
+echo "DIRECT TEST" | nc -w 3 192.168.170.22 9100
+
+# 3. Test via CUPS
+echo "CUPS TEST" | lp -d printer_name -o raw
+
+# 4. Check job queue
+lpstat -W completed | head -5
+lpstat -W not-completed
+
+# 5. Check CUPS logs
+sudo tail -30 /var/log/cups/error_log
 ```
 
-### Logs Location
+### macOS Development (Docker Desktop)
 
-| Service | Log Command |
-|---------|-------------|
-| All | `docker compose logs` |
-| Backend | `docker compose logs backend` |
-| Frontend | `docker compose logs frontend` |
-| Database | `docker compose logs mysql` |
-| NGINX | `docker compose logs nginx` |
+On macOS, Unix sockets can't cross the Docker Desktop VM boundary. The system will automatically detect this and fall back to the internal CUPS daemon. This is expected for local development.
 
-### Health Checks
-
-```bash
-# API Health
-curl -k https://localhost/api/system/health
-
-# CUPS Status
-docker exec printer-backend lpstat -t
-
-# Database Status
-docker exec printer-mysql mysqladmin -u root -p ping
-```
-
-### Reset Everything
-
-⚠️ **WARNING: This deletes all data!**
-
-```bash
-# Stop and remove everything
-docker compose down -v
-
-# Remove all images
-docker compose down --rmi all
-
-# Fresh start
-docker compose up -d
-```
-
----
-
-## Architecture Overview
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    NGINX (Port 443/80)                      │
-│                  SSL Termination + Proxy                    │
-└──────────────────────────┬──────────────────────────────────┘
-                           │
-         ┌─────────────────┼─────────────────┐
-         │                 │                 │
-         ▼                 ▼                 ▼
-┌─────────────┐   ┌─────────────┐   ┌─────────────┐
-│  Frontend   │   │   Backend   │   │    MySQL    │
-│   (React)   │   │  (Node.js)  │   │  Database   │
-│  Port 80    │   │  Port 3000  │   │  Port 3306  │
-└─────────────┘   │  + CUPS 631 │   └─────────────┘
-                  └─────────────┘
-```
-
-### Data Persistence
-
-| Volume | Container Path | Purpose |
-|--------|---------------|---------|
-| mysql_data | /var/lib/mysql | Database files |
-| cups_data | /etc/cups | CUPS configuration |
-| cups_spool | /var/spool/cups | Print queue |
-
----
-
-## Support
-
-### Resources
-
-- **GitHub Issues:** [Report bugs](https://github.com/saun1790/Printer-Server-Manager/issues)
-- **Documentation:** `/documentation` page in the app
-
-### Contributing
-
-1. Fork the repository
-2. Create feature branch
-3. Make changes
-4. Submit pull request
-
----
-
-## License
-
-MIT License - See [LICENSE](LICENSE) file for details.
-
----
-
-**Version:** 1.0.0  
-**Last Updated:** February 2026
+For macOS dev, use the `docker-compose.override.yml` which enables the internal CUPS and exposes port 631.
