@@ -4,17 +4,66 @@
 
 const { exec, spawn } = require('child_process');
 const fs = require('fs');
+const net = require('net');
 const logger = require('./logger');
 
-// Check if CUPS socket exists (for Docker with mounted socket)
+// Check if CUPS socket should be used.
+// Trust the CUPS_SERVER env var (set by start.sh after runtime validation)
+// rather than just checking file existence — a mounted socket from macOS host
+// passes fs.existsSync but is non-functional inside Docker Desktop's Linux VM.
 const CUPS_SOCKET = '/var/run/cups/cups.sock';
-const USE_CUPS_SOCKET = fs.existsSync(CUPS_SOCKET);
+const cupsServerEnv = process.env.CUPS_SERVER || '';
+let USE_CUPS_SOCKET = cupsServerEnv.startsWith('/') && fs.existsSync(cupsServerEnv);
+
+if (USE_CUPS_SOCKET) {
+    logger.info(`CUPS socket mode enabled via CUPS_SERVER=${cupsServerEnv}`);
+} else {
+    logger.info(`CUPS using local daemon (CUPS_SERVER=${cupsServerEnv || 'localhost'})`);
+}
 
 // Default environment with CUPS_SERVER for all commands
 const CUPS_ENV = {
     ...process.env,
-    CUPS_SERVER: process.env.CUPS_SERVER || (USE_CUPS_SOCKET ? CUPS_SOCKET : 'localhost')
+    CUPS_SERVER: cupsServerEnv || 'localhost'
 };
+
+/**
+ * Validate CUPS socket is actually usable (not a dead mount).
+ * Call once at startup to disable socket mode if broken.
+ */
+async function validateCupsSocket() {
+    if (!USE_CUPS_SOCKET) return;
+    
+    return new Promise((resolve) => {
+        const sock = net.createConnection(cupsServerEnv);
+        const timer = setTimeout(() => {
+            sock.destroy();
+            logger.warn(`CUPS socket ${cupsServerEnv} timed out — falling back to local CUPS`);
+            USE_CUPS_SOCKET = false;
+            CUPS_ENV.CUPS_SERVER = 'localhost';
+            resolve(false);
+        }, 3000);
+        
+        sock.on('connect', () => {
+            clearTimeout(timer);
+            sock.destroy();
+            logger.info(`CUPS socket ${cupsServerEnv} validated OK`);
+            resolve(true);
+        });
+        
+        sock.on('error', (err) => {
+            clearTimeout(timer);
+            sock.destroy();
+            logger.warn(`CUPS socket ${cupsServerEnv} not usable (${err.message}) — falling back to local CUPS`);
+            USE_CUPS_SOCKET = false;
+            CUPS_ENV.CUPS_SERVER = 'localhost';
+            resolve(false);
+        });
+    });
+}
+
+// Run validation on module load (non-blocking)
+validateCupsSocket().catch(() => {});
 
 /**
  * Execute a shell command and return promise with output

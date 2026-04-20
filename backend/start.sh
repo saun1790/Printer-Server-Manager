@@ -22,12 +22,16 @@ if [ -S /var/run/cups/cups.sock ]; then
         export CUPS_SERVER=/var/run/cups/cups.sock
     else
         echo "⚠️  Host CUPS socket exists but scheduler not responding"
-        echo "   Make sure CUPS is running on the host: sudo systemctl start cups"
+        echo "   (common on macOS Docker Desktop — Unix sockets can't cross the VM boundary)"
+        echo "   Falling back to internal CUPS daemon"
         USE_HOST_CUPS=false
+        # Explicitly tell Node.js NOT to use the socket
+        export CUPS_SERVER=localhost
     fi
 else
     echo "📦 No host CUPS socket - using internal CUPS server"
     USE_HOST_CUPS=false
+    export CUPS_SERVER=localhost
 fi
 
 # Only start internal CUPS if not using host CUPS

@@ -111,12 +111,12 @@ router.post('/file', requireRole(['admin', 'operator']), upload.single('file'), 
         `, [printer_id, req.user.id, req.file.originalname, 1, parseInt(copies), printResult.jobId?.split('-').pop()]);
         
         // Log action
-        await logAction(req, 'print', 'file_upload', {
+        await logAction('print', 'file_upload', {
             printer_id,
             file: req.file.originalname,
             size: req.file.size,
             job_id: jobId
-        });
+        }, req);
         
         // Schedule file cleanup after 5 minutes
         setTimeout(() => {
@@ -209,7 +209,7 @@ router.post('/test', requireRole(['admin', 'operator']), async (req, res, next) 
         const printResult = await cupsService.printTestPage(printer.cups_name);
         
         // Log action
-        await logAction(req, 'print', 'test_page', { printer_id, printer_name: printer.name });
+        await logAction('print', 'test_page', { printer_id, printer_name: printer.name }, req);
         
         res.json({
             success: printResult.success,
@@ -270,7 +270,7 @@ router.delete('/queue/:jobId', requireRole(['admin', 'operator']), async (req, r
         const result = await cupsService.cancelJob(jobId);
         
         if (result.success) {
-            await logAction(req, 'cancel', 'print_job', { cups_job_id: jobId });
+            await logAction('cancel', 'print_job', { cups_job_id: jobId }, req);
         }
         
         res.json(result);
